@@ -1,0 +1,282 @@
+openapi: 3.1.0
+info:
+  title: Telegram Translation Bot API
+  version: 0.3.0
+  description: |
+    Hợp đồng hành vi (contract) cho Telegram bot phiên dịch.
+    Bot nhận lệnh và tin nhắn văn bản qua Telegram Bot API,
+    dịch nội dung thông qua OpenAI-compatible endpoint
+    (mặc định: `mimo-v2.5-free` qua `https://opencode.ai/zen/v1`).
+
+    Phiên bản 0.2.0: Thêm `/settings`, `/zh`, `/da`. Tổng cộng 7 lệnh
+    (5 command + 2 quick set) + 1 handler dịch văn bản.
+
+    Phiên bản 0.3.0: Thêm auto-override target — khi user nhắn tiếng Trung (`zh`)
+    hoặc tiếng Đan Mạch (`da`), bot tự động dịch sang tiếng Việt bất kể target setting.
+    `/zh` và `/da` vẫn hoạt động để set target khi cần dịch chiều ngược lại.
+
+    Lưu ý: Đây không phải REST API truyền thống; mỗi "endpoint" tương ứng
+    với một command/handler trong bot. Spec phục vụ tài liệu hoá & test.
+  contact:
+    name: tele-bot-dich
+  license:
+    name: MIT
+servers:
+  - url: https://api.telegram.org/bot{token}
+    description: Telegram Bot API
+    variables:
+      token:
+        default: YOUR_BOT_TOKEN
+        description: Token bot từ @BotFather
+
+tags:
+  - name: meta
+    description: Lệnh meta (chào, trợ giúp)
+  - name: settings
+    description: Cấu hình ngôn ngữ theo user
+  - name: translate
+    description: Dịch văn bản
+
+paths:
+  /start:
+    post:
+      tags: [meta]
+      summary: Lệnh /start
+      description: Chào mừng user mới, hiển thị hướng dẫn sử dụng.
+      responses:
+        '200':
+          description: Tin nhắn chào thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotReply'
+
+  /help:
+    post:
+      tags: [meta]
+      summary: Lệnh /help
+      description: Liệt kê các lệnh khả dụng.
+      responses:
+        '200':
+          description: Tin nhắn trợ giúp
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotReply'
+
+  /set_target:
+    post:
+      tags: [settings]
+      summary: Lệnh /set_target
+      description: Đặt ngôn ngữ đích cho user hiện tại.
+      parameters:
+        - name: lang
+          in: query
+          required: true
+          description: Mã ngôn ngữ ISO 639-1 (vd: vi, en, ja, zh, ko, fr, de, es, ru, th).
+          schema:
+            type: string
+            pattern: '^[a-z]{2}$'
+            example: vi
+      responses:
+        '200':
+          description: Đặt thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotReply'
+        'E002':
+          $ref: '#/components/responses/InvalidLang'
+
+  /target:
+    post:
+      tags: [settings]
+      summary: Lệnh /target
+      description: Xem ngôn ngữ đích hiện tại.
+      responses:
+        '200':
+          description: Mã ngôn ngữ đích
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  target_lang:
+                    type: string
+                    example: vi
+
+  /settings:
+    post:
+      tags: [settings]
+      summary: Lệnh /settings
+      description: |
+        Hiển thị panel cài đặt (HTML) gồm:
+        - Ngôn ngữ đích hiện tại.
+        - Gợi ý cú pháp `/set_target <mã>`.
+        - Quick set commands: `/zh` (Trung), `/da` (Đan Mạch).
+        - Danh sách 10 mã ngôn ngữ phổ biến.
+      responses:
+        '200':
+          description: Panel cài đặt (HTML)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotReply'
+
+  /zh:
+    post:
+      tags: [settings]
+      summary: Lệnh /zh (Quick set)
+      description: |
+        Shortcut: set target sang **Tiếng Trung** (zh / 中文) không cần
+        truyền tham số. Tương đương `/set_target zh`.
+      responses:
+        '200':
+          description: Đã đặt target = zh
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotReply'
+
+  /da:
+    post:
+      tags: [settings]
+      summary: Lệnh /da (Quick set)
+      description: |
+        Shortcut: set target sang **Tiếng Đan Mạch** (da / Dansk) không cần
+        truyền tham số. Tương đương `/set_target da`.
+      responses:
+        '200':
+          description: Đã đặt target = da
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BotReply'
+
+  /translate:
+    post:
+      tags: [translate]
+      summary: Dịch văn bản (tin nhắn thường)
+      description: |
+        User gửi tin nhắn văn bản (không phải command).
+        Bot tự phát hiện ngôn ngữ nguồn, dịch sang target_lang của user.
+
+        **Auto-override (v0.3.0):** Nếu source language được phát hiện là
+        `zh` (Tiếng Trung) hoặc `da` (Tiếng Đan Mạch), bot tự động dịch sang
+        `vi` (Tiếng Việt) bất kể target_lang setting. Lý do: khi user nhắn
+        bằng ngôn ngữ "ngoại", ý đồ gần như luôn là "dịch giúp sang Việt".
+
+        `/zh` và `/da` vẫn hoạt động bình thường để set target = Trung/Đan Mạch
+        khi cần dịch chiều ngược lại (vd: từ Việt → Trung).
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              minLength: 1
+              maxLength: 4000
+              example: "Hello, how are you today?"
+      responses:
+        '200':
+          description: Bản dịch thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationResult'
+        'E001':
+          $ref: '#/components/responses/InvalidText'
+        'E003':
+          $ref: '#/components/responses/UpstreamError'
+
+components:
+  schemas:
+    BotReply:
+      type: object
+      required: [chat_id, text]
+      properties:
+        chat_id:
+          type: integer
+          format: int64
+          example: 123456789
+        text:
+          type: string
+          example: "Xin chào! Tôi là bot phiên dịch. Gửi /help để xem hướng dẫn."
+        parse_mode:
+          type: string
+          enum: [MarkdownV2, HTML, Markdown]
+          default: MarkdownV2
+
+    TranslationResult:
+      type: object
+      required: [source_lang, target_lang, translated]
+      properties:
+        source_lang:
+          type: string
+          description: Mã ngôn ngữ nguồn (ISO 639-1 hoặc "auto")
+          example: en
+        target_lang:
+          type: string
+          example: vi
+        translated:
+          type: string
+          example: "Xin chào, hôm nay bạn có khỏe không?"
+
+    SetTargetResult:
+      type: object
+      required: [user_id, target_lang, via]
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          example: 123456789
+        target_lang:
+          type: string
+          description: Mã ngôn ngữ vừa set (ISO 639-1)
+          example: zh
+        via:
+          type: string
+          description: Command đã dùng
+          enum: ["/set_target", "/zh", "/da"]
+          example: /zh
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [E001, E002, E003, E004]
+        message:
+          type: string
+
+  responses:
+    InvalidText:
+      description: Văn bản rỗng hoặc vượt quá 4000 ký tự
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: E001
+            message: "Văn bản phải từ 1–4000 ký tự."
+
+    InvalidLang:
+      description: Mã ngôn ngữ không hợp lệ
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: E002
+            message: "Mã ngôn ngữ không hợp lệ. Ví dụ: vi, en, ja, zh, ko."
+
+    UpstreamError:
+      description: Lỗi OpenAI API (timeout, rate limit, server error)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: E003
+            message: "Dịch vụ dịch đang bận, vui lòng thử lại sau ít phút."
