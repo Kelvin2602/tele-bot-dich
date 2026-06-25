@@ -1,13 +1,13 @@
-FROM python:3.14-slim
+FROM python:3.12.2-slim
 
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml .
-COPY src/ src/
+# Install dependencies first (cached if requirements.txt unchanged)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install the package in editable mode
-RUN pip install --no-cache-dir -e .
+# Copy source code
+COPY . .
 
-# Run bot (webhook mode via env var)
+# Run bot
 CMD ["python", "-m", "tele_bot_dich"]
